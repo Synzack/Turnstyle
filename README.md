@@ -1,6 +1,8 @@
 # Turnstyle
 Ansible Scripts to Deploy an example Turnstile Page. 
 
+For educational purposes and authorized engagments.
+
 ## How To Configure
 
 1. Update `config.py` with your SITE_KEY, SECRET_KEY, SECRET_URL, SERVICE_NAME, and SERVICE_ICON (URL)
