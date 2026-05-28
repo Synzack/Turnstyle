@@ -1,6 +1,8 @@
 # Turnstyle
 Ansible Scripts to Deploy an example Turnstile Page. 
 
+Corresponding blog post: https://specterops.io/blog/2026/05/28/dont-jump-the-turnstile-lessons-from-the-field/
+
 For educational purposes and authorized engagments.
 
 ## How To Configure
