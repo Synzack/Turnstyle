@@ -1,0 +1,5 @@
+SITE_KEY = ""
+SECRET_KEY = ""   
+SECRET_URL = ""  
+SERVICE_NAME = ""
+SERVICE_ICON = ""

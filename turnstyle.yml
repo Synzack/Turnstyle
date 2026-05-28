@@ -1,0 +1,187 @@
+---
+- name: Deploy TurnStyle
+  hosts: all
+  become: yes
+  vars:
+    app_name: "<app name>"
+    domain_name: "<domain>"
+    turnstile_landing_page: "</landing-page>"
+  
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+    
+    - name: Install required packages
+      apt:
+        name:
+          - apache2
+          - libapache2-mod-wsgi-py3
+          - python3-venv
+          - python3-pip
+        state: present
+
+    - name: Ensure snapd is installed
+      apt: 
+        name: snapd
+        state: present
+        update_cache: yes
+
+    - name: Install Certbot from snapd
+      community.general.snap:
+        name: certbot
+        classic: yes
+        state: present
+    
+    - name: Check if Apache is installed
+      command: systemctl status apache2
+      register: apache_status
+      ignore_errors: yes
+      failed_when: false
+
+    - name: Stop Apache temporarily for certbot
+      service:
+        name: apache2
+        state: stopped
+      when: apache_status.rc == 0
+
+    - name: Obtain SSL Certificates
+      command: >
+        /snap/bin/certbot certonly
+        --standalone
+        -d {{ domain_name }}
+        -n
+        --register-unsafely-without-email
+        --agree-tos
+      args:
+        creates: /etc/letsencrypt/live/{{ domain_name }}/fullchain.pem
+
+    - name: Start Apache after certbot
+      service:
+        name: apache2
+        state: started
+      when: apache_status.rc == 0
+  
+    - name: Create application directory
+      file:
+        path: "/var/www/{{ app_name }}"
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: '0755'
+    
+    - name: Copy app.py to application directory
+      copy:
+        src: app.py
+        dest: "/var/www/{{ app_name }}/app.py"
+        owner: www-data
+        group: www-data
+        mode: '0644'
+    
+    - name: Copy config.py to application directory
+      copy:
+        src: config.py
+        dest: "/var/www/{{ app_name }}/config.py"
+        owner: www-data
+        group: www-data
+        mode: '0644'
+    
+    - name: Create WSGI file
+      copy:
+        content: |
+          import sys
+          import logging
+          logging.basicConfig(stream=sys.stderr)
+          sys.path.insert(0, "/var/www/{{ app_name }}")
+          from app import app as application
+        dest: "/var/www/{{ app_name }}/{{ app_name }}.wsgi"
+        owner: www-data
+        group: www-data
+        mode: '0644'
+    
+    - name: Create Python virtual environment
+      command: python3 -m venv /var/www/{{ app_name }}/venv
+      args:
+        creates: "/var/www/{{ app_name }}/venv/bin/activate"
+    
+    - name: Set ownership of venv directory
+      file:
+        path: "/var/www/{{ app_name }}/venv"
+        owner: www-data
+        group: www-data
+        recurse: yes
+    
+    - name: Install Flask and requests in virtualenv
+      pip:
+        name:
+          - flask
+          - requests
+        virtualenv: "/var/www/{{ app_name }}/venv"
+        virtualenv_python: python3
+    
+    - name: Deploy Apache SSL configuration
+      copy:
+        content: |
+          <VirtualHost *:443>
+              SSLEngine On
+              SSLVerifyClient none
+              SSLProxyEngine On
+              SSLProxyVerify none
+              SSLProxyCheckPeerCN off
+              SSLProxyCheckPeerExpire off
+              SSLCertificateFile /etc/letsencrypt/live/{{ domain_name }}/fullchain.pem
+              SSLCertificateKeyFile /etc/letsencrypt/live/{{ domain_name }}/privkey.pem
+              
+              ServerName {{ domain_name }}
+              ServerAdmin webmaster@localhost
+              DocumentRoot /var/www/html/
+              
+              WSGIDaemonProcess {{ app_name }} python-home=/var/www/{{ app_name }}/venv python-path=/var/www/{{ app_name }}
+              WSGIProcessGroup {{ app_name }}
+              WSGIScriptAlias {{ turnstile_landing_page }} /var/www/{{ app_name }}/{{ app_name }}.wsgi
+              
+              <Directory /var/www/{{ app_name }}>
+                  Require all granted
+                  DirectorySlash Off
+              </Directory>
+              
+              ErrorLog ${APACHE_LOG_DIR}/error.log
+              CustomLog ${APACHE_LOG_DIR}/access.log combined
+              
+              RewriteEngine On
+          </VirtualHost>
+        dest: /etc/apache2/sites-available/default-ssl.conf
+        owner: root
+        group: root
+        mode: '0644'
+        backup: yes
+    
+    - name: Enable Apache SSL module
+      apache2_module:
+        name: ssl
+        state: present
+      
+    - name: Enable Apache rewrite module
+      apache2_module:
+        name: rewrite
+        state: present
+    
+    - name: Enable Apache WSGI module
+      apache2_module:
+        name: wsgi
+        state: present
+    
+    - name: Enable default-ssl site
+      command: a2ensite default-ssl.conf
+    
+    - name: Ensure Apache is enabled and started
+      service:
+        name: apache2
+        state: started
+        enabled: yes
+
+    - name: Restart Apache using systemd
+      systemd:
+        name: apache2
+        state: restarted
